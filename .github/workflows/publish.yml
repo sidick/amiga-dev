@@ -47,20 +47,40 @@ jobs:
           tag="${{ github.event.inputs.tag || github.ref_name }}"
           echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
 
+      # The docker-container driver (as opposed to buildx's default "docker"
+      # driver) is what makes cache-to/cache-from type=gha available - the
+      # plain docker driver can't export to an external cache backend. Each
+      # matrix leg gets its own builder instance implicitly (one per
+      # runner), so amd64 and arm64 never share a build context.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # GCC-from-source is the single slowest step in this pipeline;
+      # mode=max caches every intermediate layer (not just the final image),
+      # so an unrelated tool-layer-only change doesn't pay to rebuild GCC.
+      # Scoped per-arch since amd64 and arm64 compiler-base layers are
+      # independently built and shouldn't share or clobber each other's
+      # cache entries.
       - name: Build compiler-base layer
         run: |
-          docker build \
+          docker buildx build \
+            --load \
             -f vendor/container-amiga-gcc/Containerfile \
             -t amiga-dev-compiler-base:local \
             --build-arg BUILD_GCC_BRANCH="${BUILD_GCC_BRANCH}" \
             --build-arg BUILD_GCC_VERSION="${BUILD_GCC_VERSION}" \
+            --cache-from "type=gha,scope=compiler-base-${{ matrix.arch }}" \
+            --cache-to "type=gha,mode=max,scope=compiler-base-${{ matrix.arch }}" \
             vendor/container-amiga-gcc
 
       - name: Build tool layer
         run: |
-          docker build \
+          docker buildx build \
+            --load \
             -t amiga-dev:local \
             --build-arg BASE_IMAGE=amiga-dev-compiler-base:local \
+            --cache-from "type=gha,scope=tool-layer-${{ matrix.arch }}" \
+            --cache-to "type=gha,mode=max,scope=tool-layer-${{ matrix.arch }}" \
             .
 
       # Compiles and runs the same fixture (the compiler-base submodule's own

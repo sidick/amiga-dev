@@ -45,6 +45,10 @@ this isn't a "hasn't gotten to it yet" gap worth waiting on. Copperline is
 Rust/GPL-3.0, so building from source is straightforward; pin to a tagged
 release commit, not a branch tip.
 
+**Re-checked at the 0.14.0 bump:** same asset shape (amd64 AppImage, no
+Linux aarch64), so `install-copperline.sh`'s build-from-source arm64 path
+needed no changes, only the version pin.
+
 ## Survey per-repo CI dependencies
 
 Surveyed `amiauth` and `sana2loop`'s current `ci.yml` (both already run
