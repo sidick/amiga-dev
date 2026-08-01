@@ -86,7 +86,7 @@ jobs:
           sha256sum smoke/hello | awk "{print \$1}" > "hello-${{ matrix.arch }}.sha256"
 
       - name: Upload reproducibility fixture
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hello-${{ matrix.arch }}
           path: hello-${{ matrix.arch }}.sha256
@@ -110,7 +110,7 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           pattern: hello-*
           path: fixtures
