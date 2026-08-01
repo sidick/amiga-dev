@@ -53,7 +53,7 @@ jobs:
       # matrix leg gets its own builder instance implicitly (one per
       # runner), so amd64 and arm64 never share a build context.
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # GCC-from-source is the single slowest step in this pipeline;
       # mode=max caches every intermediate layer (not just the final image),
