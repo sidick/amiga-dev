@@ -73,6 +73,11 @@ jobs:
       # cache entries. Pushed (not --load) to an internal tag, overwritten
       # every run, purely as a relay so the tool-layer build below can pull
       # it - not part of the published multi-arch surface.
+      #
+      # TODO: this leaves internal-compiler-base-{amd64,arm64} visible in
+      # the package's tag list. Acceptable for now; revisit hiding/pruning
+      # it later if it ever gets confusing (untagged-image cleanup policy,
+      # a separate GHCR package, etc).
       - name: Build compiler-base layer
         run: |
           base_tag="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:internal-compiler-base-${{ matrix.arch }}"
