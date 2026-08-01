@@ -179,7 +179,7 @@ jobs:
               "$base:$version-amd64" \
               "$base:$version-arm64"
           done <<< "${{ steps.version.outputs.tags }}"
-          digest=$(docker buildx imagetools inspect "$base:$version" --format '{{json .Manifest}}' | grep -o '"digest":"[^"]*"' | head -1 | cut -d'"' -f4)
+          digest=$(docker buildx imagetools inspect "$base:$version" | awk '/^Digest:/ {print $2; exit}')
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Generate artifact attestation
