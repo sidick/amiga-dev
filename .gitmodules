@@ -1,0 +1,3 @@
+[submodule "vendor/container-amiga-gcc"]
+	path = vendor/container-amiga-gcc
+	url = https://github.com/sidick/container-amiga-gcc.git

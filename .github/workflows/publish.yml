@@ -1,0 +1,187 @@
+name: Publish amiga-dev image
+
+# Builds the compiler-base layer (vendor/container-amiga-gcc, pinned by the
+# submodule commit) and the tool layer (this repo's Dockerfile) natively on
+# each architecture - no QEMU cross-emulation, since compiling a full GCC
+# cross-toolchain from source under emulation is both slow and a poor
+# reproducibility baseline. See docs/phase0-decisions.md for why arm64 here
+# uses free public-repo GitHub-hosted runners rather than anything paid.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version to publish, e.g. v1.0.0"
+        required: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  BUILD_GCC_BRANCH: amiga6
+  BUILD_GCC_VERSION: 6.5.0b
+
+jobs:
+  build:
+    name: Build (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Resolve version
+        id: version
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build compiler-base layer
+        run: |
+          docker build \
+            -f vendor/container-amiga-gcc/Containerfile \
+            -t amiga-dev-compiler-base:local \
+            --build-arg BUILD_GCC_BRANCH="${BUILD_GCC_BRANCH}" \
+            --build-arg BUILD_GCC_VERSION="${BUILD_GCC_VERSION}" \
+            vendor/container-amiga-gcc
+
+      - name: Build tool layer
+        run: |
+          docker build \
+            -t amiga-dev:local \
+            --build-arg BASE_IMAGE=amiga-dev-compiler-base:local \
+            .
+
+      # Compiles and runs the same fixture (the compiler-base submodule's own
+      # test/hello.c) through GCC and vamos in one shot, so a broken GCC
+      # install and a broken amitools install each fail this the same way.
+      # Also checks the other tools every downstream repo's CI depends on
+      # are actually on PATH, not just present somewhere in the image.
+      - name: Smoke test
+        run: |
+          mkdir -p smoke
+          cp vendor/container-amiga-gcc/test/hello.c smoke/hello.c
+          docker run --rm -v "$PWD/smoke:/work" -w /work amiga-dev:local sh -euc '
+            command -v m68k-amigaos-gcc
+            command -v gencrc
+            command -v vamos
+            command -v xdftool
+            command -v copperline
+            m68k-amigaos-gcc -O2 -o hello hello.c
+            file hello | grep -q "AmigaOS object/library data\|Amiga.*executable"
+            vamos ./hello | grep -q "Hello world!"
+            file /opt/copperline/bin/copperline
+          '
+          sha256sum smoke/hello | awk "{print \$1}" > "hello-${{ matrix.arch }}.sha256"
+
+      - name: Upload reproducibility fixture
+        uses: actions/upload-artifact@v4
+        with:
+          name: hello-${{ matrix.arch }}
+          path: hello-${{ matrix.arch }}.sha256
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push arch-specific tag
+        run: |
+          arch_tag="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-${{ matrix.arch }}"
+          docker tag amiga-dev:local "$arch_tag"
+          docker push "$arch_tag"
+          echo "$arch_tag" >> "$GITHUB_STEP_SUMMARY"
+
+  reproducibility-gate:
+    name: Cross-arch reproducibility gate
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: hello-*
+          path: fixtures
+          merge-multiple: false
+
+      # The same source, compiled by two independently-built toolchains (one
+      # hosted on amd64, one on arm64), must produce the identical m68k
+      # object. If this ever fails, that's signal that something host-arch-
+      # dependent leaked into the build (a timestamp, an embedded path) -
+      # not necessarily a real functional bug, but worth treating as one
+      # until proven otherwise.
+      - name: Compare m68k output across arches
+        run: |
+          amd64=$(cat fixtures/hello-amd64/hello-amd64.sha256)
+          arm64=$(cat fixtures/hello-arm64/hello-arm64.sha256)
+          echo "amd64: $amd64"
+          echo "arm64: $arm64"
+          if [ "$amd64" != "$arm64" ]; then
+            echo "::error::cross-arch reproducibility gate failed: hello.c compiled to different output on amd64 vs arm64"
+            exit 1
+          fi
+
+  manifest:
+    name: Publish multi-arch manifest
+    needs: [build, reproducibility-gate]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    steps:
+      - name: Resolve version and tag fanout
+        id: version
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          version="${tag#v}"
+          major="${version%%.*}"
+          minor="${version%.*}"
+          {
+            echo "version=$version"
+            echo "tags<<EOF"
+            echo "$version"
+            echo "$minor"
+            echo "$major"
+            echo "latest"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Combine per-arch images into multi-arch manifests
+        id: combine
+        run: |
+          base="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          version="${{ steps.version.outputs.version }}"
+          while IFS= read -r t; do
+            [ -n "$t" ] || continue
+            docker buildx imagetools create \
+              -t "$base:$t" \
+              "$base:$version-amd64" \
+              "$base:$version-arm64"
+          done <<< "${{ steps.version.outputs.tags }}"
+          digest=$(docker buildx imagetools inspect "$base:$version" --format '{{json .Manifest}}' | grep -o '"digest":"[^"]*"' | head -1 | cut -d'"' -f4)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.combine.outputs.digest }}
+          push-to-registry: true
