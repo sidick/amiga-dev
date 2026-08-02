@@ -49,17 +49,24 @@ RUN set -eu; \
         /tmp/install-copperline.sh amd64 \
         ;; \
       arm64) \
-        build_deps="build-essential curl git ca-certificates pkg-config \
+        # curl/git/ca-certificates are kept installed (not purged below),
+        # matching amd64 - which never purges them either, since they're
+        # inherited unremoved from the compiler-base layer. Both consumer
+        # repos' `make dist` git-clones a pinned lha commit; parity here
+        # means that works the same on a native arm64 Mac pull as it does
+        # in amd64 CI, instead of only working on one architecture.
+        build_only_deps="build-essential pkg-config \
           libasound2-dev libudev-dev libx11-dev libxcursor-dev \
           libxrandr-dev libxi-dev libxkbcommon-dev libwayland-dev" && \
         apt-get update && \
-        apt-get install -y --no-install-recommends ${build_deps} && \
+        apt-get install -y --no-install-recommends \
+          curl git ca-certificates ${build_only_deps} && \
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
           | sh -s -- -y --profile minimal --default-toolchain stable && \
         . "$HOME/.cargo/env" && \
         /tmp/install-copperline.sh arm64 && \
         rustup self uninstall -y && \
-        apt-get purge -y ${build_deps} && \
+        apt-get purge -y ${build_only_deps} && \
         apt-get install -y --no-install-recommends \
           libasound2t64 libudev1 libx11-6 libxcursor1 libxrandr2 libxi6 \
           libxkbcommon0 libwayland-client0 && \
