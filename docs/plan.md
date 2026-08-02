@@ -1,6 +1,6 @@
 # Plan: Shared Toolchain & CI Infrastructure (amiga-dev / amiga-workflows)
 
-**Status:** Phases 0–2 complete. Phase 3 (sana2loop conversion) next.
+**Status:** Phases 0–3 complete. Phase 4 (AmiAuth conversion) next.
 **Companion:** [`docs/phase0-decisions.md`](phase0-decisions.md) — every
 Phase 0 decision, corrected assumption, and open design note lives there;
 this file tracks progress phase-by-phase rather than re-deriving the
@@ -84,33 +84,80 @@ Known gap: only `build-test.yml` got a live CI run. `docs.yml` and
 (Pages config, a real gated-environment reviewer, a real dist artifact) —
 their first live exercise will be Phase 3.
 
-## Phase 3 — First consumer: sana2loop — next
+## Phase 3 — First consumer: sana2loop — ✅ done
 
-The extraction source converts first — its CI is the newest and most
-complete, so this phase is mostly deletion:
+Converted for real, not just planned — `ci.yml`/`docs.yml`/`release.yml` are
+now callers into `sidick/amiga-workflows@v1`, real CI is green
+(`build`/`test-host`/`test-target`/`lint`/`docs-build` all passing on
+`main`). Several places the original plan's assumptions didn't survive
+contact with the real repo or the shared workflows' actual behavior:
 
-- Makefile aligned to the verb contract (mostly renames from `make amiga`/
-  `make test-harness`/`make docker` to `build`/`test-host`/`test-target`/
-  `dist`).
-- `.github/workflows/ci.yml`, `docs.yml`, `release.yml` replaced by ~10-line
-  callers into `sidick/amiga-workflows@v1`.
-- This is the first real test of `docs.yml` and `aminet-release.yml` in
-  anger, not just a fixture.
-- Coverage parity checked deliberately: every test that ran before runs
-  after (compare the job lists, not vibes) — sana2loop's current CI has
-  more jobs than the verb contract's five (e.g. two separate
-  copperline-smoke jobs, a semgrep job) — decide per Phase 4's own escape
-  hatch principle whether each folds into a verb, becomes a workflow input,
-  or stays a documented local step.
-- Real-KS1.3 runs move to the optional `AMIGA_REAL_ROM_B64` secret /
-  `AMIGA_REAL_ROM` env var `build-test.yml` already plumbs through.
-- Harness extraction (deferred from Phase 1) can resume here now that
-  there's a real second consumer's actual needs to design against, subject
-  to the KS1.3-exception guidance in phase0-decisions.md.
+- **Makefile: aliases, not renames.** The plan assumed renaming `make
+  amiga`/`make test-harness`/`make docker` outright. In practice
+  README.md, CLAUDE.md, and userdocs/Building-and-Testing.md all document
+  those names already — renaming would have meant rewriting user-facing
+  docs as part of a CI-plumbing change. The five verb-contract targets
+  (`build`/`test-host`/`test-target`/`lint`/`dist`) were added as thin
+  wrappers around the existing targets instead.
+- **Coverage mapping, decided per-job:** `resolve-image` job is gone (the
+  pinned toolchain is amiga-dev's own versioned image now, not a
+  per-repo digest). The two `copperline-smoke-*-aros` jobs fold into one
+  sequential `make test-target` (same two Copperline boot sessions, one
+  job instead of two — build-test.yml's jobs don't share artifacts, so
+  each verb job that needs binaries builds them itself, a real
+  wall-clock/compute cost of standardizing that's worth knowing about
+  going into Phase 4). `semgrep` folds into `make lint`. `docs-build`
+  (strict MkDocs + AmigaGuide check) stays a **local** job in `ci.yml` by
+  deliberate choice — doesn't fit any of the five verbs, and
+  `build-test.yml` has no hook for an extra per-project job.
+- **Real-ROM secret is structurally unusable, not just unused.** The
+  original plan text here said real-KS1.3 runs would "move to" the
+  optional `AMIGA_REAL_ROM_B64` secret. Checked sana2loop's own CLAUDE.md
+  ("Why the real-1.3 ROM stays out of CI"): GitHub Actions secrets cap at
+  48 KB; a real Kickstart 1.3 ROM dump is 256–512 KB. The secret mechanism
+  physically cannot hold a real ROM. Real-KS1.3 validation stays a
+  local/manual step (`make copperline-smoke KICK=...`) as sana2loop
+  already documented — this isn't a Phase 3 gap, the plan's assumption was
+  just wrong.
+- **Two real bugs, both caught by an actual CI run, not review:**
+  1. A reusable workflow's own `permissions:` block can only narrow, never
+     widen, what the *calling* job already has. `docs.yml` and
+     `aminet-release.yml` each declare `contents: write` internally (for
+     `mike deploy --push` and `gh release create`), but the caller has to
+     grant it too or it silently gets capped down. Added explicitly to
+     sana2loop's `docs.yml`/`release.yml` callers — this applies to every
+     future conversion that calls either workflow, not just sana2loop.
+  2. `BUILD := build` in sana2loop's Makefile meant `$(BUILD)` was
+     literally the identifier `build` — the pre-existing `$(BUILD):`
+     directory-creation rule collided with the new verb-contract `build:`
+     target, and Make silently merged their prerequisites. `make guide`'s
+     order-only `| $(BUILD)` dependency ended up triggering the full m68k
+     cross-build, breaking on `docs-build`'s plain runner (no
+     `m68k-amigaos-gcc`). Fixed by having `guide` `mkdir` its own build
+     dir, like every other target already did, instead of depending on a
+     same-named target. Caught by the real CI run, not local validation —
+     worth remembering that a green local Docker test doesn't fully
+     stand in for the actual matrix of runners a workflow uses.
+- **Also fixed in amiga-dev itself, surfaced by this phase:** the arm64
+  tool-layer build purged `curl`/`git`/`ca-certificates` after building
+  Copperline from source, while amd64 never did (nothing to purge there).
+  `make dist`'s pinned `lha` fetch needs `git`, and that only worked on
+  one architecture as a result — fixed so both arches keep them.
+- Harness extraction (deferred from Phase 1) is **still** deferred — Phase
+  3 didn't end up touching boot-config/harness code at all, just CI
+  plumbing. Still parked for Phase 4, per the KS1.3-exception guidance in
+  phase0-decisions.md.
 
-*Exit: sana2loop green on `@v1` with strictly less YAML and no lost
-coverage; a toolchain bump PR (image v1.0.0 → v1.0.1) merges clean as a
-rehearsal.*
+Known gap: `docs.yml`'s permissions fix and the `release.yml` →
+`aminet-release.yml` conversion are committed and actionlint-clean, but
+haven't had a *live* tag-triggered run yet (no version tag was pushed this
+session) — first real exercise of both is whenever sana2loop's next release
+happens.
+
+*Exit: sana2loop green on `@v1` — confirmed for real
+(`build`/`test-host`/`test-target`/`lint`/`docs-build` all passing). Toolchain
+bump rehearsal (image v1.0.0 → v1.0.1, Copperline 0.14.0 + build caching)
+already happened earlier in this same session, ahead of Phase 3 itself.*
 
 ## Phase 4 — Second consumer: AmiAuth
 
@@ -179,16 +226,18 @@ hour.*
 ## Success criteria
 
 - A new project's entire CI is the caller file (~10 lines) plus its
-  Makefile. *(Proven mechanically true for build-test.yml via the fixture
-  repo; not yet proven against a real project.)*
+  Makefile. *(Proven against a real project as of Phase 3 — sana2loop's
+  `ci.yml` is 3 jobs: the build-test.yml caller, plus one deliberately-local
+  `docs-build` job that doesn't fit the verb contract.)*
 - One toolchain upgrade = one amiga-dev tag + N auto-raised, individually
   green PRs; no repo left behind silently. *(Renovate/Dependabot config is
   Phase 5.)*
 - The cross-arch reproducibility gate has blocked zero releases (or,
   better, has blocked one and caught something real). *(Currently: zero,
-  and it has run for real exactly once, on v1.0.0.)*
+  and it has run for real exactly twice, on v1.0.0 and v1.0.1.)*
 - `make test-target` on the MacBook and in CI run the same image, same ROM,
-  same harness. *(True today for the fixture repo; the real test is Phase
-  3.)*
+  same harness. *(True for the fixture repo and now for sana2loop's real
+  CI; real-Kickstart-1.3 itself stays local/manual by design, not a CI
+  path — see Phase 3's "Real-ROM secret is structurally unusable" note.)*
 - Six months on: no repo has re-grown bespoke CI YAML, and the shared layer
   has gained no project-named special cases.
