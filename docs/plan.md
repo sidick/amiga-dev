@@ -1,6 +1,6 @@
 # Plan: Shared Toolchain & CI Infrastructure (amiga-dev / amiga-workflows)
 
-**Status:** Phases 0–3 complete. Phase 4 (AmiAuth conversion) next.
+**Status:** Phases 0–4 complete. Phase 5 (AmiRFB + the rest) next.
 **Companion:** [`docs/phase0-decisions.md`](phase0-decisions.md) — every
 Phase 0 decision, corrected assumption, and open design note lives there;
 this file tracks progress phase-by-phase rather than re-deriving the
@@ -159,28 +159,76 @@ happens.
 bump rehearsal (image v1.0.0 → v1.0.1, Copperline 0.14.0 + build caching)
 already happened earlier in this same session, ahead of Phase 3 itself.*
 
-## Phase 4 — Second consumer: AmiAuth
+## Phase 4 — Second consumer: AmiAuth — ✅ done
 
-The assumption-flusher: a shipped, security-sensitive repo with the most
-distinctive CI (RFC vectors host-side, differential fuzz vs OpenSSL, vamos
-vector runs, Copperline gui-smoke, Aminet release gate) and its own
-path-based change-detection (`changes` job) sana2loop's CI doesn't have.
+The assumption-flusher, as planned: a shipped, security-sensitive repo with
+the most distinctive CI of the two consumers so far, and the first with its
+own path-based change-detection (`changes` job) skipping build/test jobs on
+docs-only PRs — a mechanism sana2loop's CI never had.
 
-- Convert to the callers; every place the shared layer doesn't fit is
-  treated as a finding: either the workflow gains a *general* input, the
-  image gains a dependency, or the repo keeps a documented local step. No
-  project-specific clauses in shared code.
-- `differential` (fuzz vs OpenSSL) and `catalog-lint` have no equivalent in
-  the five-verb contract or in sana2loop — decide whether they fold into
-  `lint`/`test-host` generically or stay local.
-- Note: amiauth's current CI pins Copperline from a different source
-  (`LinuxJedi/Copperline`, an old pre-transfer URL) and a different version
-  (0.11.0) than sana2loop (`CopperlineHQ/Copperline` 0.13.0) — converting
-  to `build-test.yml` fixes this divergence for free, since both then use
-  whatever amiga-dev's image bundles.
+- **Aliases, not renames — same call as Phase 3, bigger payoff.** The five
+  verb-contract targets wrap the existing, already-documented ones
+  (`test`/`cli`/`smoke`/`m68k`/`gui`/`copperline-smoke`/`check-catalog`/...).
+- **The `changes` job stays local and feeds `build-test.yml`'s inputs
+  directly** (`run-build: ${{ needs.changes.outputs.build == 'true' }}`,
+  etc.) — no shared-workflow change needed, since those inputs are just
+  booleans a caller sets. This preserves the skip-on-docs-only-PR behavior
+  without any project-specific clause in the shared layer.
+- **Coverage mapping:** `test-host` now covers what were two separate CI
+  jobs — RFC vector tests + native CLI + e2e CLI smoke, *and* the
+  vamos-validated m68k asm crypto tests — because "vectors, portable core,
+  vamos runs" is the verb contract's own definition of `test-host`, and
+  that job already runs inside the amiga-dev image (has `cc`,
+  `m68k-amigaos-gcc`, and `vamos` all at once, so no more need for the old
+  `asm-tests-docker`'s nested-container indirection). `test-target` matches
+  today's `copperline-smoke` exactly (RFC 4226 HOTP core on real m68k) —
+  deliberately **not** `gui-smoke`/`qr-onhw-smoke`/`arexx-onhw-smoke`/
+  `catalog-onhw-smoke`, none of which actually run in CI today (they're
+  dev-only Copperline checks needing more local setup than a fresh
+  checkout provides) — coverage parity means matching what CI does today,
+  not opportunistically wiring in more while in the neighborhood.
+  `check-catalog` folds into `make lint` (the only static check this repo
+  has). `differential` (opt-in OpenSSL fuzz) and `docs-build` stay separate
+  local jobs, same shape as sana2loop's `docs-build`.
+- Confirmed for free: amiauth's CI was pinning Copperline from a different
+  source (`LinuxJedi/Copperline`, pre-transfer) and version (0.11.0) than
+  sana2loop. Converting to `build-test.yml` fixes this divergence
+  automatically — both now use whatever amiga-dev's image bundles.
+- **Three real bugs found, none guessable from the plan text:**
+  1. Same `$(BUILD)`/`build:` collision as sana2loop's Phase 3 bug, but
+     *fifteen* order-only prerequisites deep, not one — reproduced and
+     confirmed empirically before fixing this time (not just inferred from
+     Phase 3), since a target as basic as `make test` would otherwise have
+     silently started requiring the m68k cross-compiler.
+  2. `src/cli/main.c` needed `#define _POSIX_C_SOURCE 200809L` before its
+     includes — `fileno()` compiled fine on a bare `ubuntu-latest` runner
+     (old CI) but not inside amiga-dev's own image (new CI), whose glibc is
+     stricter about POSIX symbol visibility under `-std=c99`. A real
+     application-source fix, not just CI plumbing — flagged as such rather
+     than folded in silently.
+  3. **Branch protection required status checks reference job names
+     directly** (`"m68k Amiga build"`, `"Host vector tests"`, ...) — none
+     of which exist once those jobs run inside a called reusable workflow
+     (they report as `"ci / build"`, `"ci / test-host"`, etc. instead).
+     Left unfixed, every future PR would block forever on checks that never
+     report again. Updated to the new names — verified against a *real* PR
+     first (not assumed from Phase 3's fixture-repo precedent), confirming
+     both the exact context strings and that a job skipped via
+     `run-test-host: false` (nested inside the called workflow, not a
+     top-level `if:` anymore) still reports "skipped" and still satisfies
+     the required check the same way the old top-level `if:`-gated jobs
+     did.
+- A real, unrelated release in flight during this same conversion: a
+  locally-committed, unpushed "bump to v1.1" commit rode along through the
+  conversion PR (rebase, not cherry-pick, so nothing was dropped) — flagged
+  explicitly before pushing anything to `main`, sequenced by explicit
+  choice (convert first, tag v1.1 after) rather than assumed.
 
-*Exit: AmiAuth green on `@v1`; the shared layer's changelog shows what the
-second consumer taught it.*
+*Exit: AmiAuth green on `@v1`, confirmed for real — every job
+(`build`/`test-host`/`test-target`/`lint`/`differential`/`docs-build`) passing
+on a live PR (#117), branch protection updated and independently verified
+against a second, genuinely docs-only PR (#118) that showed the shared
+jobs skip and still satisfy required checks.*
 
 ## Phase 5 — The rest of the actives (rolling, low urgency)
 
@@ -210,8 +258,10 @@ hour.*
   bisection.
 - **Special per-repo needs vs shared purity:** the escape hatch is a
   repo keeping its own extra job/step rather than bending the shared layer
-  — already exercised once (differential/catalog-lint are the first real
-  candidates in Phase 4).
+  — exercised for real in Phase 4: `differential` stayed local (opt-in,
+  project-specific), `catalog-lint` folded into `make lint` instead (the
+  better fit, not a special case). Zero project-specific clauses added to
+  the shared workflows themselves across both conversions so far.
 - **PR #4 limbo:** the submodule pin works indefinitely from the branch
   commit `7f39626c0b6c8d71400f5e4112978007c62b1344`; only cost is tracking
   upstream fixes manually.
@@ -226,9 +276,12 @@ hour.*
 ## Success criteria
 
 - A new project's entire CI is the caller file (~10 lines) plus its
-  Makefile. *(Proven against a real project as of Phase 3 — sana2loop's
-  `ci.yml` is 3 jobs: the build-test.yml caller, plus one deliberately-local
-  `docs-build` job that doesn't fit the verb contract.)*
+  Makefile. *(Proven against two real projects now. sana2loop's `ci.yml` is
+  3 jobs: the build-test.yml caller, plus one deliberately-local
+  `docs-build` job that doesn't fit the verb contract. AmiAuth's is a bit
+  larger — a local `changes` job feeding the caller's inputs, plus
+  `docs-build` and `differential` — proving the pattern scales to a repo
+  with real per-project CI structure, not just the simple case.)*
 - One toolchain upgrade = one amiga-dev tag + N auto-raised, individually
   green PRs; no repo left behind silently. *(Renovate/Dependabot config is
   Phase 5.)*
