@@ -1,6 +1,6 @@
 # Plan: Shared Toolchain & CI Infrastructure (amiga-dev / amiga-workflows)
 
-**Status:** Phases 0–4 complete. Phase 5 (AmiRFB + the rest) next.
+**Status:** Phases 0–4 complete. Phase 5 in progress: AmiRFB done, portfolio-wide Renovate rollout still pending.
 **Companion:** [`docs/phase0-decisions.md`](phase0-decisions.md) — every
 Phase 0 decision, corrected assumption, and open design note lives there;
 this file tracks progress phase-by-phase rather than re-deriving the
@@ -232,14 +232,32 @@ jobs skip and still satisfy required checks.*
 
 ## Phase 5 — The rest of the actives (rolling, low urgency)
 
-- **AmiRFB** next (in-flight project, biggest matrix, currently has no
-  `.github/workflows` at all — confirmed in Phase 0's survey). Conversion
-  is mechanical by this point: verbs, caller, delete.
-- **Renovate (or Dependabot) config** added portfolio-wide so image-tag and
-  workflow-ref bumps arrive as automatic PRs.
+- **AmiRFB — ✅ done.** Not a conversion like Phases 3/4 — confirmed (again)
+  it had no `.github/workflows` at all, so this was a from-scratch CI
+  setup: `build`/`test-host` as thin verb wrappers around the existing
+  `card`/`test` targets, plus the same `$(BUILD)`/`build:` collision fixed
+  *proactively* this time (three order-only prerequisites, caught before
+  writing the verb target rather than after breaking something — Phase 4's
+  bug made this a known pattern to check for up front, not a surprise).
+  `test-target`/`lint` deliberately **disabled** (`run-test-target: false`,
+  `run-lint: false`), not stubbed as no-ops: this driver is all networking
+  and Copperline has no network support (CLAUDE.md's "Emulator testing is
+  amiberry only") — genuinely nothing for an on-target CI job to call yet,
+  not "not implemented." The plan is to move to Copperline 0.14 once its
+  non-NAT networking is validated (in progress, separate from this CI
+  work) — flip the input once that lands, no Makefile redesign needed. No
+  `docs.yml`/`release.yml` either — no docs site or Aminet release exists
+  for this project yet. `AMIGA_GCC_IMAGE` moved off the unrelated
+  `stefanreinauer/amiga-gcc` pin onto `ghcr.io/sidick/amiga-dev:1`.
+  Validated locally (`build`, `test-host`) before pushing; real CI
+  confirmed green on the first push, including `test-target`/`lint`/`dist`
+  correctly reporting "skipped" rather than missing or failing.
+- **Renovate (or Dependabot) config** — not yet started. Add portfolio-wide
+  so image-tag and workflow-ref bumps arrive as automatic PRs.
 
 *Exit: no active repo carries bespoke build/test YAML beyond its caller
-file and documented local steps.*
+file and documented local steps. (True for sana2loop, AmiAuth, AmiRFB now
+— AmiQr not yet surveyed/converted, and Renovate rollout is still open.)*
 
 ## Phase 6 — Template repo
 
