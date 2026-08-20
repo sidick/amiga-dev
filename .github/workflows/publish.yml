@@ -98,6 +98,7 @@ jobs:
             --load \
             -t amiga-dev:local \
             --build-arg BASE_IMAGE="${BASE_IMAGE}" \
+            --build-arg BUILD_GCC_VERSION="${BUILD_GCC_VERSION}" \
             --cache-from "type=gha,scope=tool-layer-${{ matrix.arch }}" \
             --cache-to "type=gha,mode=max,scope=tool-layer-${{ matrix.arch }}" \
             .

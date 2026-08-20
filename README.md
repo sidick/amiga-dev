@@ -14,7 +14,7 @@ of truth; nothing here is hand-copied because hand-copied version lists go
 stale the moment a pin moves. In short:
 
 - The m68k-amigaos GCC cross-toolchain, from a pinned commit of
-  [`sidick/container-amiga-gcc`](https://github.com/sidick/container-amiga-gcc)
+  [`reinauer/container-amiga-gcc`](https://github.com/reinauer/container-amiga-gcc)
   (`vendor/container-amiga-gcc`, a submodule) at `/opt/amiga`.
 - `amitools[vamos]`, pinned to a specific PyPI release (needed by 2+
   downstream repos' host-side tests).
@@ -31,7 +31,12 @@ Every pin lives in exactly one of two places:
   `BUILD_GCC_BRANCH`/`BUILD_GCC_VERSION` in `.github/workflows/publish.yml`
   and the local build command below. Bump by pointing the submodule at a new
   commit (`cd vendor/container-amiga-gcc && git fetch && git checkout
-  <sha>`), not by editing files inside it.
+  <sha>`), not by editing files inside it. If the bump changes
+  `BUILD_GCC_VERSION`, update `Dockerfile`'s matching `ARG
+  BUILD_GCC_VERSION` default too - the tool layer `COPY`s
+  `/opt/amiga-${BUILD_GCC_VERSION}` out of the compiler-base build stage by
+  that exact path, so a mismatch here fails the build with a "not found"
+  error on the `COPY --from=compiler-base` step.
 - **Everything else** (Copperline, amitools): an `ARG ..._VERSION` default
   near the top of `Dockerfile`.
 
@@ -57,7 +62,10 @@ docker build \
   --build-arg BUILD_GCC_VERSION=6.5.0b \
   vendor/container-amiga-gcc
 
-docker build -t amiga-dev:local --build-arg BASE_IMAGE=amiga-dev-compiler-base:local .
+docker build -t amiga-dev:local \
+  --build-arg BASE_IMAGE=amiga-dev-compiler-base:local \
+  --build-arg BUILD_GCC_VERSION=6.5.0b \
+  .
 ```
 
 Pulling the published image is architecture-transparent - Docker resolves
