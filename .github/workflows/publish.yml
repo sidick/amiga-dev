@@ -141,7 +141,7 @@ jobs:
   reproducibility-gate:
     name: Cross-arch reproducibility gate
     needs: build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -169,7 +169,7 @@ jobs:
   manifest:
     name: Publish multi-arch manifest
     needs: [build, reproducibility-gate]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: write
