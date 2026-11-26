@@ -15,7 +15,7 @@
 ARG BASE_IMAGE=amiga-dev-compiler-base:local
 FROM ${BASE_IMAGE} AS compiler-base
 
-FROM ubuntu:questing-20260610
+FROM ubuntu:26.04
 
 ARG TARGETARCH
 ARG COPPERLINE_VERSION=0.17.0
